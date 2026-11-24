@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+.citetrace/
+node_modules/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.DS_Store
+
+/CiteTrace-preview.html

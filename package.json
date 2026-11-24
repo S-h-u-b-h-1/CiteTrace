@@ -1,0 +1,20 @@
+{
+  "name": "citetrace",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A Flagsmith experiment on how people verify AI-generated claims.",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.mjs",
+    "test": "node --test",
+    "traffic": "node scripts/traffic.mjs",
+    "report": "node --env-file-if-exists=.env scripts/report.mjs",
+    "preview": "node scripts/build-preview.mjs"
+  },
+  "dependencies": {
+    "@flagsmith/nodejs": "9.4.0"
+  }
+}

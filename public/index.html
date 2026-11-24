@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f1e8">
+  <meta name="description" content="A short experiment in how people verify AI-drafted claims against their sources.">
+  <title>CiteTrace — Evidence review</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="/" aria-label="CiteTrace home"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>CiteTrace</a>
+      <div class="status" id="mode" hidden></div>
+    </div>
+  </header>
+
+  <main id="main" class="shell" tabindex="-1">
+    <section class="welcome" id="welcome" aria-labelledby="welcome-title">
+      <div class="welcome-copy">
+        <p class="eyebrow">Citation review experiment</p>
+        <h1 id="welcome-title">Does the source<br class="desktop-break"> back the claim?</h1>
+        <p class="lede">Check three AI-drafted claims against their sources. Decide what the evidence actually supports.</p>
+        <div class="welcome-action">
+          <button id="start" type="button" class="primary">Start review <span aria-hidden="true">→</span></button>
+          <p class="participation">90 seconds <span aria-hidden="true">·</span> No sign-in</p>
+        </div>
+        <p class="fine-print" id="privacy">By starting, you share your review timing and decisions with this experiment under an anonymous identifier.</p>
+      </div>
+      <figure class="welcome-figure" aria-label="A document with an excerpt linked to a claim">
+        <div class="diagram-grid" aria-hidden="true"></div>
+        <div class="diagram-page" aria-hidden="true">
+          <div class="diagram-title">Source document</div>
+          <div class="diagram-lines"><i></i><i></i><i></i></div>
+          <div class="diagram-match"><span>§</span><div class="diagram-lines"><i></i><i></i></div></div>
+          <div class="diagram-lines"><i></i><i></i><i></i></div>
+        </div>
+        <div class="diagram-connection" aria-hidden="true"></div>
+        <div class="diagram-claim" aria-hidden="true"><span class="diagram-claim-icon">¶</span><span>AI-drafted claim</span></div>
+      </figure>
+    </section>
+
+    <div id="global-error" class="notice" role="alert" hidden></div>
+
+    <section id="workspace" class="workspace" aria-labelledby="task-title" hidden>
+      <div class="task-heading">
+        <div>
+          <p class="eyebrow">Evidence review</p>
+          <h1 id="task-title" tabindex="-1"></h1>
+          <p id="task-intro" class="task-intro"></p>
+        </div>
+        <div class="timer" id="timer" role="timer" aria-label="Time remaining">
+          <span>Time remaining</span><strong id="time">1:30</strong>
+        </div>
+      </div>
+      <p class="notice" id="time-notice" role="status" hidden>Time is up. Submit your decisions to see feedback, even if some are missing.</p>
+      <div class="work-grid">
+        <form id="review" class="review" aria-label="Claim decisions">
+          <div class="section-toolbar">
+            <h2>Claims</h2>
+            <span id="progress" aria-live="polite"></span>
+          </div>
+          <div id="claims" class="claims"></div>
+          <p id="submit-error" class="notice" role="alert" hidden></p>
+          <div class="review-actions">
+            <button type="submit" id="submit" class="primary" disabled>Submit review <span aria-hidden="true">→</span></button>
+          </div>
+        </form>
+
+        <aside class="reader" id="reader" aria-labelledby="reader-title">
+          <div class="section-toolbar">
+            <h2 id="reader-title">Source viewer</h2>
+            <button id="back-to-claim" type="button" class="text-button" hidden>Back to claim <span aria-hidden="true">↑</span></button>
+          </div>
+          <div id="source-scroll" class="source-scroll" tabindex="0" aria-label="Source document text">
+            <p id="source-empty" class="empty-source">Open a citation beside a claim to inspect its source.</p>
+            <article id="source-article" hidden></article>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section id="results" class="results" aria-labelledby="result-title" hidden>
+      <p class="eyebrow">Review complete</p>
+      <h1 id="result-title" tabindex="-1">Your evidence review</h1>
+      <p id="result-summary" class="task-intro"></p>
+      <div class="result-metrics" id="result-metrics"></div>
+      <h2>Evidence breakdown</h2>
+      <div id="feedback" class="claims"></div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <p>CiteTrace</p>
+      <p>Built for Toggle Wars <span aria-hidden="true">·</span> Powered by Flagsmith</p>
+    </div>
+  </footer>
+</body>
+</html>

@@ -2,7 +2,7 @@
 
 CiteTrace tests whether opening a citation at its highlighted paragraph helps people verify AI-drafted claims without approving unsupported ones. It is a **Track 01 · Test Something Real** entry for the WeMakeDevs Toggle Wars Flagsmith hackathon.
 
-**Try it in your browser.** Download and open the [interactive offline preview](https://github.com/S-h-u-b-h-1/CiteTrace/releases/download/v1.1.0/CiteTrace-preview.html). Compare the same citation in both views side by side, then take a timed review. The preview sends no telemetry. The [2:21 demo video](https://github.com/S-h-u-b-h-1/CiteTrace/releases/download/v1.0.0/CiteTrace-Demo.mp4) walks through a complete review and the Flagsmith rehearsal.
+**Try it in your browser.** Download and open the [interactive offline preview](https://github.com/S-h-u-b-h-1/CiteTrace/releases/download/v1.2.0/CiteTrace-preview.html). Compare the same citation in both views side by side, then take a timed review. The preview sends no telemetry. The [2:21 demo video](https://github.com/S-h-u-b-h-1/CiteTrace/releases/download/v1.0.0/CiteTrace-Demo.mp4) walks through a complete review and the Flagsmith rehearsal.
 
 A reviewer has 90 seconds to read three claims about a fictional library programme and decide whether each is supported, contradicted, or insufficiently evidenced. In control, a citation opens the full source at the top. In treatment, the same source opens at the highlighted paragraph. Claims, options, document text, and scoring stay fixed.
 
@@ -44,11 +44,11 @@ Set `FLAGSMITH_ENVIRONMENT_KEY` in `.env`. For a local Flagsmith instance, also 
 
 ### Flagsmith's role
 
-The Node SDK evaluates the multivariate flag against a stable anonymous identifier. CiteTrace requires a valid active experiment assignment before returning a live task. Flagsmith owns the allocation, and its SDK records an exposure after the assigned task renders. The same identifier links the exposure and outcomes. The local database keeps the first submission and queues each event once per participant in normal single-process operation. The SDK buffers and transmits events separately from that database.
+The Node SDK evaluates the multivariate flag against a stable anonymous identifier. CiteTrace validates that the assignment's variant key and rendered citation view agree. Flagsmith owns the allocation. For the original demo task the app records exposure as the review opens. In a held-out live pilot the server timestamps exposure and serves the claims in the same request. The same identifier links the exposure and outcomes. The local database keeps the first submission and queues each event once per participant in normal single-process operation. The SDK buffers and transmits events separately from that database.
 
 | Event | Recorded when |
 | --- | --- |
-| `$flag_exposure` | The assigned review first renders |
+| `$flag_exposure` | The assigned review first opens, or the server first serves a held-out task |
 | `review_submitted` | A valid first submission arrives, with elapsed seconds |
 | `review_passed` | That submission has all three correct answers within the limit |
 | `false_approval` | A submitted verdict approves at least one unsupported claim |
@@ -63,11 +63,11 @@ CITETRACE_URL=http://127.0.0.1:3001 npm run traffic -- 100
 npm run report -- .citetrace/synthetic.sqlite
 ```
 
-The generator checks for synthetic mode before creating any attempts. It scripts correct, wrong, and abandoned reviews independent of the assignment and verifies the server's scores. The audit groups attempts by data namespace, experiment ID, and arm. Its verdict table distinguishes direct contradictions from cases with insufficient evidence, so you can see which type reviewers mistakenly approved. Claim counts cover submitted reviews, including unanswered claims in timed-out submissions. The audit checks expected events against the local ledger. SDK queue counts indicate local handoff. Verify delivery and view any experiment estimates in Flagsmith.
+The generator checks for synthetic mode before creating any attempts. It scripts correct, wrong, and abandoned reviews independent of the assignment and verifies the server's scores. The audit groups attempts by data namespace, experiment ID, and arm. It compares how many exposed reviewers answered everything correctly within 30, 60, and 90 seconds, keeping dropouts in the denominator. Its verdict table distinguishes approvals of directly contradicted claims from approvals where the source is inconclusive. Claim counts cover submitted reviews, including unanswered claims in timed-out submissions. The audit checks expected events against the local ledger. SDK queue counts indicate local handoff. Verify delivery and view any experiment estimates in Flagsmith.
 
 ### Run a held-out human pilot
 
-Use a fresh task for participants who could have seen the demo answers. `CITETRACE_TASK_FILE` takes an absolute path to a private JSON file with the same schema as `data/task.mjs`. Assign both arms the same frozen task. Only the source and claims go to the browser before submission. With a Flagsmith key configured, `CITETRACE_EXPERIMENT_ID` must match the designated pilot experiment before enrollment. The local audit keeps each task revision separate. See the [pilot procedure](docs/experiment.md#run-a-held-out-pilot) for setup, recruitment, and interpretation.
+Use a fresh task for participants who could have seen the demo answers. `CITETRACE_TASK_FILE` takes an absolute path to a private JSON file with the same schema as `data/task.mjs`. Assign both arms the same frozen task. In a live held-out pilot, the server starts the clock when it serves the claims. Answers are scored on submission. With a Flagsmith key configured, `CITETRACE_EXPERIMENT_ID` must match the designated pilot experiment before enrollment. Set both `CITETRACE_PILOT_START_UTC` and `CITETRACE_PILOT_END_UTC` to enforce the collection window. Reviews already exposed can finish on their original clock. The local audit keeps each task revision separate. See the [pilot procedure](docs/experiment.md#run-a-held-out-pilot) for setup, recruitment, and interpretation.
 
 ## Verify
 

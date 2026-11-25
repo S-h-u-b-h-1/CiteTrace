@@ -96,12 +96,14 @@ function validateAnswers(answers, claims, allowPartial) {
 }
 
 export function createApp({ databasePath = ':memory:', provider = createPreviewProvider(), task = TASK,
-  taskRevision = null, expectedExperimentId = null, clock = Date.now, secureCookie = false, logger = console } = {}) {
+  taskRevision = null, expectedExperimentId = null, pilotWindow = null,
+  clock = Date.now, secureCookie = false, logger = console } = {}) {
   const namespace = taskRevision
     ? `${provider.namespace}:task-${taskRevision}:experiment-${expectedExperimentId ?? 'preview'}`
     : provider.namespace;
   const reviews = openReviews(databasePath, namespace);
   const publicTask = taskForParticipant(task);
+  const timedDisclosure = Boolean(taskRevision && provider.mode === 'flagsmith');
   let providerError = false;
   let queueError = false;
 
@@ -130,14 +132,29 @@ export function createApp({ databasePath = ':memory:', provider = createPreviewP
   }
 
   function session(row) {
+    const requiresExposure = timedDisclosure && row?.exposed_at === null;
     return {
       mode: provider.mode,
       traffic: provider.traffic,
       variant: row?.variant ?? null,
-      task: row ? publicTask : null,
+      task: row && !requiresExposure ? publicTask : null,
+      ...(requiresExposure ? { requiresExposure: true } : {}),
       ...reviewTimes(row),
       result: row?.result_json ? JSON.parse(row.result_json) : null,
     };
+  }
+
+  function admissionStatus(at) {
+    if (!pilotWindow) return 'open';
+    if (at < pilotWindow.startsAt) return 'upcoming';
+    if (at >= pilotWindow.endsAt) return 'closed';
+    return 'open';
+  }
+
+  function requireOpenEnrollment(at) {
+    const status = admissionStatus(at);
+    if (status === 'upcoming') throw new RequestError(409, 'The review pilot has not opened yet.');
+    if (status === 'closed') throw new RequestError(410, 'The review pilot is closed to new attempts.');
   }
 
   async function handle(req, res) {
@@ -160,28 +177,34 @@ export function createApp({ databasePath = ':memory:', provider = createPreviewP
       }
 
       if (method === 'GET' && pathname === '/api/session') {
-        return sendJson(res, 200, session(reviews.read(participantId(req))));
+        const row = reviews.read(participantId(req));
+        const visible = row && (row.exposed_at !== null || admissionStatus(clock()) === 'open');
+        return sendJson(res, 200, session(visible ? row : null));
       }
 
       if (method === 'POST' && pathname === '/api/start') {
         verifyOrigin(req);
-        const id = useParticipant(req, res, secureCookie);
-        const existing = reviews.read(id);
+        const existing = reviews.read(participantId(req));
+        if (existing && existing.exposed_at !== null) return sendJson(res, 200, session(existing));
+        requireOpenEnrollment(clock());
         if (existing) return sendJson(res, 200, session(existing));
 
+        const id = useParticipant(req, res, secureCookie);
         let assignment;
         try {
           assignment = await provider.assign(id);
-        if (expectedExperimentId !== null && Number(assignment.experimentId) !== expectedExperimentId) {
-          throw new Error('Flagsmith assigned a different experiment.');
-        }
+          if (expectedExperimentId !== null && Number(assignment.experimentId) !== expectedExperimentId) {
+            throw new Error('Flagsmith assigned a different experiment.');
+          }
           providerError = false;
         } catch {
           providerError = true;
           logger.error('Flagsmith could not assign the requested active experiment.');
           throw new RequestError(503, 'Experiment assignment is temporarily unavailable. Please try again.');
         }
-        return sendJson(res, 200, session(reviews.enroll(id, assignment, clock())));
+        const enrolledAt = clock();
+        requireOpenEnrollment(enrolledAt);
+        return sendJson(res, 200, session(reviews.enroll(id, assignment, enrolledAt)));
       }
 
       if (method === 'POST' && (pathname === '/api/exposure' || pathname === '/api/submit')) {
@@ -191,9 +214,11 @@ export function createApp({ databasePath = ':memory:', provider = createPreviewP
         if (!row) throw new RequestError(409, 'Start a review first.');
 
         if (pathname === '/api/exposure') {
-          const exposed = reviews.expose(id, clock(), EXPOSURE_EVENT);
+          const exposedAt = clock();
+          if (row.exposed_at === null) requireOpenEnrollment(exposedAt);
+          const exposed = reviews.expose(id, exposedAt, EXPOSURE_EVENT);
           sendPending();
-          return sendJson(res, 200, reviewTimes(exposed));
+          return sendJson(res, 200, { ...reviewTimes(exposed), ...(timedDisclosure ? { task: publicTask } : {}) });
         }
 
         if (row.result_json) {

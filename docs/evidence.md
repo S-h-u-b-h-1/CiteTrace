@@ -2,7 +2,7 @@
 
 ## What to try
 
-1. Download and open the [offline preview](https://github.com/S-h-u-b-h-1/CiteTrace/releases/download/v1.1.0/CiteTrace-preview.html) in a browser. No sign-in or dependencies are required.
+1. Download and open the [offline preview](https://github.com/S-h-u-b-h-1/CiteTrace/releases/download/v1.2.0/CiteTrace-preview.html) in a browser. No sign-in or dependencies are required.
 2. In the side-by-side comparison, select the booking-transfer claim. Both panels show the same complete policy. The control starts at the first section and the focused view starts at the cited transfer-policy paragraph.
 3. Finish a review to see your score, time, unsupported approvals, and the exact passage behind each verdict. The preview records no experimental data.
 
@@ -28,4 +28,4 @@ The [held-out pilot procedure](experiment.md#run-a-held-out-pilot) uses a fresh 
 
 ## Reproduce the checks
 
-Run `npm test` for the app and scoring checks. Run `npm run preview` to regenerate the interactive HTML. With a rehearsal database, run `npm run report -- <database.sqlite>` for participant-free counts and event reconciliation by namespace, Flagsmith experiment ID, and arm. The verdict table breaks out mistakes on contradicted claims and claims with insufficient evidence. The report identifies missing or unexpected local events and distinguishes queued events from pending local handoff. Confirm provider delivery separately in Flagsmith.
+Run `npm test` for the app and scoring checks. Run `npm run preview` to regenerate the interactive HTML. With a rehearsal database, run `npm run report -- <database.sqlite>` for participant-free counts and event reconciliation by namespace, Flagsmith experiment ID, and arm. The comparison reports both exposure counts and differences in cumulative correct reviews at 30, 60, and 90 seconds. It leaves differences blank when an arm has no exposures. The verdict table breaks out mistakes on contradicted claims and claims with insufficient evidence. The report identifies missing or unexpected local events and distinguishes queued events from pending local handoff. Confirm provider delivery separately in Flagsmith.

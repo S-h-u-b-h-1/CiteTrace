@@ -5,13 +5,20 @@ const db = new DatabaseSync(databasePath, { readOnly: true });
 try {
   db.exec('BEGIN');
   const rows = db.prepare(`
+    WITH scored AS (
+      SELECT *, COALESCE(json_extract(result_json, '$.passed'), 0) AS didPass,
+             submitted_at - exposed_at AS elapsedMs
+        FROM reviews
+    )
     SELECT namespace, experiment_id AS experimentId, variant, COUNT(*) AS enrolled,
            SUM(exposed_at IS NOT NULL) AS exposed,
            SUM(submitted_at IS NOT NULL) AS submitted,
-           SUM(COALESCE(json_extract(result_json, '$.passed'), 0)) AS passed,
+           SUM(didPass) AS passed,
+           SUM(CASE WHEN didPass AND elapsedMs BETWEEN 0 AND 30000 THEN 1 ELSE 0 END) AS passedBy30Seconds,
+           SUM(CASE WHEN didPass AND elapsedMs BETWEEN 0 AND 60000 THEN 1 ELSE 0 END) AS passedBy60Seconds,
            SUM(COALESCE(json_extract(result_json, '$.expired'), 0)) AS expiredSubmissions,
            SUM(COALESCE(json_extract(result_json, '$.falseApprovals'), 0) > 0) AS reviewersWithFalseApproval
-      FROM reviews
+      FROM scored
      GROUP BY namespace, experiment_id, variant
      ORDER BY namespace, experiment_id, variant
   `).all();
@@ -80,11 +87,49 @@ try {
     verdictBreakdown: verdictsByArm.get(armKey(row)),
     eventAudit: audits.get(armKey(row)),
   }));
+  const comparisonsByExperiment = new Map();
+  for (const arm of arms) {
+    const key = JSON.stringify([arm.namespace, arm.experimentId]);
+    if (!comparisonsByExperiment.has(key)) comparisonsByExperiment.set(key, {});
+    comparisonsByExperiment.get(key)[arm.variant] = arm;
+  }
+  const comparisons = Array.from(comparisonsByExperiment, ([key, pair]) => {
+    const [namespace, experimentId] = JSON.parse(key);
+    const control = pair.full_source;
+    const focused = pair.focused_source;
+    const controlExposed = control?.exposed ?? 0;
+    const focusedExposed = focused?.exposed ?? 0;
+    const exposures = controlExposed + focusedExposed;
+    const comparable = controlExposed > 0 && focusedExposed > 0;
+    const eventCounts = Object.values(pair).flatMap((arm) => Object.values(arm.eventAudit));
+    const rateGap = (outcome) => comparable
+      ? 100 * (focused[outcome] / focusedExposed - control[outcome] / controlExposed)
+      : null;
+    return {
+      namespace,
+      experimentId,
+      controlExposed,
+      focusedExposed,
+      focusedExposureShare: exposures ? focusedExposed / exposures : null,
+      hasBothExposedArms: comparable,
+      missingLocalEvents: eventCounts.reduce((total, event) => total + event.missing, 0),
+      unexpectedLocalEvents: eventCounts.reduce((total, event) => total + event.unexpected, 0),
+      focusedMinusControlPercentagePoints: {
+        passedBy30Seconds: rateGap('passedBy30Seconds'),
+        passedBy60Seconds: rateGap('passedBy60Seconds'),
+        passedBy90Seconds: rateGap('passed'),
+        submitted: rateGap('submitted'),
+        reviewersWithFalseApproval: rateGap('reviewersWithFalseApproval'),
+      },
+    };
+  });
   console.log(JSON.stringify({
     source: 'CiteTrace local audit',
     sdkQueueNote: 'SDK queue counts reflect local handoff only. Provider delivery requires separate verification.',
     verdictBreakdownNote: 'Claim counts come from submitted reviews with recorded feedback. They include unanswered claims in submitted reviews and exclude abandoned reviews.',
+    comparisonNote: 'Rate differences use all exposed reviewers as denominators. They are descriptive and do not select a winning arm.',
     arms,
+    comparisons,
   }, null, 2));
 } finally {
   db.close();

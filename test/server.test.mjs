@@ -318,3 +318,97 @@ test('rejects held-out assignments from a different Flagsmith experiment before 
   assert.equal((await request(app, '/api/exposure', { method: 'POST', cookie: attempt.cookie })).status, 409);
   assert.deepEqual(fixture.calls.map(([kind]) => kind), ['assignment']);
 });
+
+const pilotStart = '2026-11-26T10:00:00Z';
+const pilotEnd = '2026-11-26T10:01:00Z';
+const pilotWindowEnv = { CITETRACE_PILOT_START_UTC: pilotStart, CITETRACE_PILOT_END_UTC: pilotEnd };
+const pilotFlagsmithEnv = { FLAGSMITH_ENVIRONMENT_KEY: 'fake-test-key', CITETRACE_EXPERIMENT_ID: '42' };
+
+test('accepts only a paired, ordered UTC window for a held-out Flagsmith pilot', async (t) => {
+  const { publicRoot, env } = await privateTaskFiles(t);
+  const load = (variables) => loadTaskConfiguration(variables, publicRoot, TASK);
+  const configured = { ...env, ...pilotFlagsmithEnv, ...pilotWindowEnv };
+  const { pilotWindow } = await load(configured);
+  assert.deepEqual(pilotWindow, { startsAt: Date.parse(pilotStart), endsAt: Date.parse(pilotEnd) });
+  await assert.rejects(load({ ...env, ...pilotWindowEnv }), /requires a held-out task and a Flagsmith/);
+  await assert.rejects(load({ ...configured, CITETRACE_PILOT_END_UTC: '' }), /Set both/);
+  await assert.rejects(load({ ...configured, CITETRACE_PILOT_START_UTC: '2026-11-26T15:30:00+05:30' }), /valid ISO 8601 UTC/);
+  await assert.rejects(load({ ...configured, CITETRACE_PILOT_START_UTC: '2026-02-30T10:00:00Z' }), /valid ISO 8601 UTC/);
+  await assert.rejects(load({ ...configured, CITETRACE_PILOT_END_UTC: pilotStart }), /after its start/);
+});
+
+test('withholds the live task until timed exposure and preserves the deadline after recruitment closes', async (t) => {
+  const { publicRoot, env } = await privateTaskFiles(t);
+  const config = await loadTaskConfiguration({ ...env, ...pilotFlagsmithEnv, ...pilotWindowEnv }, publicRoot, TASK);
+  const fixture = flagsmithFixture();
+  let now = Date.parse(pilotStart) - 1;
+  const app = createApp({ ...config, provider: fixture.provider, clock: () => now });
+  t.after(() => app.close());
+
+  assert.equal((await request(app, '/api/start', { method: 'POST' })).status, 409);
+  assert.deepEqual(fixture.calls, []);
+
+  now = Date.parse(pilotStart);
+  const first = await request(app, '/api/start', { method: 'POST' });
+  const waiting = await request(app, '/api/start', { method: 'POST' });
+  const pending = await request(app, '/api/session', { cookie: first.cookie });
+  for (const response of [first, pending, waiting]) {
+    assert.equal(response.status, 200);
+    assert.equal(response.json.task, null);
+    assert.equal(response.json.startedAt, null);
+    assert.equal(response.json.requiresExposure, true);
+  }
+
+  now = Date.parse(pilotEnd) - 1;
+  const exposure = await request(app, '/api/exposure', { method: 'POST', cookie: first.cookie });
+  assert.equal(exposure.status, 200);
+  assert.equal(exposure.json.startedAt, new Date(now).toISOString());
+  assert.equal(exposure.json.expiresAt, new Date(now + 90_000).toISOString());
+  assert.equal(exposure.json.task.title, 'Held-out test fixture');
+  assert.equal(exposure.json.task.claims[0].answer, undefined);
+  assert.equal(exposure.json.task.claims[0].explanation, undefined);
+
+  now = Date.parse(pilotEnd);
+  assert.equal((await request(app, '/api/start', { method: 'POST' })).status, 410);
+  assert.equal((await request(app, '/api/start', { method: 'POST', cookie: waiting.cookie })).status, 410);
+  assert.equal((await request(app, '/api/exposure', { method: 'POST', cookie: waiting.cookie })).status, 410);
+  assert.equal((await request(app, '/api/session', { cookie: waiting.cookie })).json.task, null);
+
+  const resumed = await request(app, '/api/session', { cookie: first.cookie });
+  assert.deepEqual(resumed.json.task, exposure.json.task);
+  assert.equal(resumed.json.requiresExposure, undefined);
+  const repeated = await request(app, '/api/exposure', { method: 'POST', cookie: first.cookie });
+  assert.equal(repeated.json.expiresAt, exposure.json.expiresAt);
+  const result = await request(app, '/api/submit', { method: 'POST', cookie: first.cookie, body: { answers: correctAnswers } });
+  assert.equal(result.status, 200);
+  assert.equal(result.json.passed, true);
+  assert.equal(fixture.calls.filter(([kind]) => kind === 'assignment').length, 2);
+  assert.equal(fixture.calls.filter(([kind]) => kind === 'exposure').length, 1);
+});
+
+test('discards an assignment that completes after the pilot window closes', async (t) => {
+  const { publicRoot, env } = await privateTaskFiles(t);
+  const config = await loadTaskConfiguration({ ...env, ...pilotFlagsmithEnv, ...pilotWindowEnv }, publicRoot, TASK);
+  const fixture = flagsmithFixture();
+  const enteredProvider = Promise.withResolvers();
+  const resumeProvider = Promise.withResolvers();
+  const provider = { ...fixture.provider, async assign(id) {
+    const assignment = await fixture.provider.assign(id);
+    enteredProvider.resolve();
+    await resumeProvider.promise;
+    return assignment;
+  } };
+  let now = Date.parse(pilotEnd) - 1;
+  const app = createApp({ ...config, provider, clock: () => now });
+  t.after(() => app.close());
+
+  const started = request(app, '/api/start', { method: 'POST' });
+  await enteredProvider.promise;
+  now = Date.parse(pilotEnd);
+  resumeProvider.resolve();
+  const response = await started;
+  assert.equal(response.status, 410);
+  assert.deepEqual(fixture.calls.map(([kind]) => kind), ['assignment']);
+  assert.equal((await request(app, '/api/session', { cookie: response.cookie })).json.task, null);
+  assert.equal((await request(app, '/api/exposure', { method: 'POST', cookie: response.cookie })).status, 409);
+});

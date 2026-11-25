@@ -11,7 +11,6 @@ let clock;
 let deadline;
 let timeExpired = false;
 let lastCitation;
-let exposing = false;
 let submitting = false;
 
 function node(tag, className, text) {
@@ -27,12 +26,25 @@ async function request(route, payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   };
-  const response = await fetch(`/api/${route}`, { cache: 'no-store', ...options });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(typeof body.error === 'string' ? body.error : 'The review server did not respond. Please try again.');
+  let response;
+  let body;
+  let receivedAt;
+  try {
+    response = await fetch(`/api/${route}`, { cache: 'no-store', signal: globalThis.AbortSignal?.timeout?.(12_000), ...options });
+    receivedAt = performance.now();
+    body = await response.json();
+  } catch (error) {
+    throw new Error(error?.name === 'TimeoutError'
+      ? 'The connection timed out. Please try again.'
+      : 'The review server did not respond. Please try again.');
   }
-  return body;
+  if (!response.ok) {
+    throw new Error(typeof body?.error === 'string' ? body.error : 'The review server did not respond. Please try again.');
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new Error('The review server returned an incomplete response. Please try again.');
+  }
+  return { ...body, receivedAt };
 }
 
 function setMode({ mode, traffic }) {
@@ -51,6 +63,7 @@ function updateProgress() {
   ui.progress.textContent = `${complete} of ${total} reviewed`;
   ui.submit.disabled = submitting || !session.startedAt || (!timeExpired && complete < total);
   ui.submit.firstChild.textContent = submitting ? 'Submitting… ' : 'Submit review ';
+  for (const input of ui.claims.querySelectorAll('input[type="radio"]')) input.disabled = submitting || timeExpired;
 }
 
 function answerKey() {
@@ -73,16 +86,11 @@ function restoreAnswers() {
 }
 
 function drawTimer() {
-  if (!Number.isFinite(deadline)) {
-    ui.time.textContent = 'Starting…';
-    return;
-  }
   const seconds = Math.max(0, Math.ceil((deadline - performance.now()) / 1000));
   ui.time.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
   ui.timer.classList.toggle('ending', seconds <= 15);
   if (seconds === 0) {
     timeExpired = true;
-    for (const input of ui.claims.querySelectorAll('input[type="radio"]')) input.disabled = true;
     ui['time-notice'].hidden = false;
     clearInterval(clock);
     updateProgress();
@@ -91,7 +99,7 @@ function drawTimer() {
 
 function startClock() {
   clearInterval(clock);
-  deadline = performance.now() + Date.parse(session.expiresAt) - Date.parse(session.serverNow);
+  deadline = session.receivedAt + Date.parse(session.expiresAt) - Date.parse(session.serverNow);
   drawTimer();
   if (deadline > performance.now()) clock = setInterval(drawTimer, 200);
 }
@@ -166,49 +174,28 @@ function showError(element, message) {
   element.hidden = !message;
 }
 
-function afterPaint() {
-  return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-}
-
-async function recordExposure() {
-  if (session.startedAt || exposing) return;
-  exposing = true;
-  showError(ui['global-error'], '');
-  try {
-    await afterPaint();
-    Object.assign(session, await request('exposure', {}));
-    saveAnswers();
-    startClock();
-    updateProgress();
-  } catch (error) {
-    showError(ui['global-error'], error.message);
-    const retry = node('button', 'text-button', 'Retry connection');
-    retry.type = 'button';
-    retry.addEventListener('click', recordExposure, { once: true });
-    ui['global-error'].append(retry);
-    retry.focus();
-  } finally {
-    exposing = false;
+async function enterReview(state, focus) {
+  if (!state.startedAt && !state.result) {
+    Object.assign(state, await request('exposure', {}));
   }
-}
-
-function enterReview(state, focus) {
+  if (!state.task || !state.startedAt || ![state.expiresAt, state.serverNow].every((value) => Number.isFinite(Date.parse(value)))) {
+    throw new Error('The review could not start its timer. Please try again.');
+  }
   session = state;
   setMode(state);
-  ui.welcome.hidden = true;
   if (state.result) {
     renderResults(state.result, focus);
     return;
   }
+  ui.welcome.hidden = true;
   restoreAnswers();
   ui['task-title'].textContent = session.task.title;
   ui['task-intro'].textContent = session.task.intro;
   ui.claims.replaceChildren(...session.task.claims.map(reviewCard));
   ui.workspace.hidden = false;
-  updateProgress();
   startClock();
+  updateProgress();
   if (focus) ui['task-title'].focus();
-  if (!session.startedAt) void recordExposure();
 }
 
 function buildMetric(value, label) {
@@ -218,15 +205,22 @@ function buildMetric(value, label) {
 }
 
 function renderResults(result, focus = true) {
+  if (!Array.isArray(result.feedback) || result.feedback.length !== session.task.claims.length) {
+    throw new Error('The review results were incomplete. Please try again.');
+  }
   clearInterval(clock);
+  try { sessionStorage.removeItem(answerKey()); } catch { /* Storage can be blocked by browser settings. */ }
+  ui.welcome.hidden = true;
   ui.workspace.hidden = true;
   ui.results.hidden = false;
   ui['result-summary'].textContent = result.passed
     ? 'You classified all three claims correctly within the review window.'
-    : 'A passing review requires all three claims to be correct within 90 seconds. Here is what the sources support.';
+    : result.expired && result.correct === result.total
+      ? 'All three verdicts were correct. The submission reached the server after the 90-second limit.'
+      : 'A passing review requires all three claims to be correct within 90 seconds. Here is what the sources support.';
   ui['result-metrics'].replaceChildren(
     buildMetric(`${result.correct}/${result.total}`, 'Correct decisions'),
-    buildMetric(`${Math.round(result.elapsedSeconds)}s`, 'Review time'),
+    buildMetric(`${result.elapsedSeconds}s`, 'Review time'),
     buildMetric(result.falseApprovals, 'Unsupported claims approved'),
   );
 
@@ -261,11 +255,12 @@ function renderResults(result, focus = true) {
 ui['back-to-claim'].addEventListener('click', () => lastCitation?.focus());
 
 ui.start.addEventListener('click', async () => {
+  if (ui.start.disabled) return;
   ui.start.disabled = true;
   ui.start.firstChild.textContent = 'Starting… ';
   showError(ui['global-error'], '');
   try {
-    enterReview(await request('start', {}), true);
+    await enterReview(await request('start', {}), true);
   } catch (error) {
     showError(ui['global-error'], error.message);
   } finally {
@@ -291,9 +286,9 @@ ui.review.addEventListener('submit', async (event) => {
 });
 
 ui.start.disabled = true;
-request('session').then((state) => {
+request('session').then(async (state) => {
   setMode(state);
-  if (state.task) enterReview(state, false);
+  if (state.task || state.requiresExposure) await enterReview(state, false);
 }).catch((error) => {
   showError(ui['global-error'], error.message);
 }).finally(() => {

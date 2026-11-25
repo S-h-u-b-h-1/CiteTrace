@@ -22,7 +22,7 @@ We ran 48 scripted sessions through Flagsmith Cloud Development. Flagsmith accep
 
 ## Judge walkthrough
 
-Download and open the [interactive offline preview](https://github.com/S-h-u-b-h-1/CiteTrace/releases/download/v1.1.0/CiteTrace-preview.html) to inspect the same citation in both views side by side and then try a timed review. It sends no telemetry. From source, `npm run preview` rebuilds that HTML file. The [2:21 demo video](https://github.com/S-h-u-b-h-1/CiteTrace/releases/download/v1.0.0/CiteTrace-Demo.mp4) walks through a completed review. The [judge evidence appendix](evidence.md) and [experiment protocol](experiment.md) record the results, limits, and verification steps.
+Download and open the [interactive offline preview](https://github.com/S-h-u-b-h-1/CiteTrace/releases/download/v1.2.0/CiteTrace-preview.html) to inspect the same citation in both views side by side and then try a timed review. It sends no telemetry. From source, `npm run preview` rebuilds that HTML file. The [2:21 demo video](https://github.com/S-h-u-b-h-1/CiteTrace/releases/download/v1.0.0/CiteTrace-Demo.mp4) walks through a completed review. The [judge evidence appendix](evidence.md) and [experiment protocol](experiment.md) record the results, limits, and verification steps.
 
 ## Submission checklist
 

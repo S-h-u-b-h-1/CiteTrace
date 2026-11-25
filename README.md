@@ -1,12 +1,14 @@
 # CiteTrace
 
-CiteTrace tests whether opening a citation at its highlighted paragraph helps people verify AI-drafted claims. It is a **Track 01 · Test Something Real** entry for the WeMakeDevs Toggle Wars Flagsmith hackathon.
+CiteTrace tests whether opening a citation at its highlighted paragraph helps people verify AI-drafted claims without approving unsupported ones. It is a **Track 01 · Test Something Real** entry for the WeMakeDevs Toggle Wars Flagsmith hackathon.
+
+**Try it in your browser.** Download and open the [interactive offline preview](https://github.com/S-h-u-b-h-1/CiteTrace/releases/download/v1.0.0/CiteTrace-preview.html) to try both citation views. The preview sends no telemetry. The [2:21 demo video](https://github.com/S-h-u-b-h-1/CiteTrace/releases/download/v1.0.0/CiteTrace-Demo.mp4) walks through a complete review and the Flagsmith experiment.
 
 A reviewer has 90 seconds to read three claims about a fictional library programme and decide whether each is supported, contradicted, or insufficiently evidenced. In control, a citation opens the full source at the top. In treatment, the same source opens at the highlighted paragraph. Claims, options, document text, and scoring stay fixed.
 
-A successful review classifies all three claims correctly within 90 seconds. The experiment also tracks whether any unsupported claim was approved. Each reviewer gets source-backed feedback after submitting.
+A successful review classifies all three claims correctly within 90 seconds. The trust guardrail counts reviewers who mark a contradicted claim or one with insufficient evidence as supported. Each reviewer gets feedback with the exact source passages behind the verdicts.
 
-The [synthetic rehearsal](docs/experiment.md#verified-synthetic-rehearsal) verified the complete Cloud integration. Flagsmith recorded 48 exposures and the dashboard matched the app's primary outcome counts. Human participant collection has yet to start.
+In the [scripted rehearsal](docs/experiment.md#verified-synthetic-rehearsal), Flagsmith accepted 130 events across 48 exposures. Its dashboard matched the app's pass rates, 13/22 for control and 15/26 for the focused view. Human outcomes remain unmeasured, so the rollout decision is to hold. See the [judge evidence appendix](docs/evidence.md) for the guardrail counts and verification details.
 
 ## Run locally
 
@@ -25,7 +27,7 @@ CITETRACE_PREVIEW_VARIANT=focused_source PORT=3001 npm start
 
 Run these in separate terminals. The two previews can share the default database because each uses a separate namespace.
 
-For a standalone walkthrough, open `CiteTrace-preview.html` from the project package in a browser. Choose either arm in the preview header. Generate a fresh copy with `npm run preview`. The file uses the same UI and scoring in memory, with no server or event traffic. Its answer key is visible to anyone inspecting the file, so keep it out of participant recruitment.
+To build the standalone preview from source, run `npm run preview`, then open the generated `CiteTrace-preview.html` in a browser. Choose either arm in the preview header. The file uses the same UI and scoring in memory, with no server or event traffic. Its answer key is visible to anyone inspecting the file, so keep it out of participant recruitment.
 
 ## Connect Flagsmith Experimentation
 
@@ -61,7 +63,7 @@ CITETRACE_URL=http://127.0.0.1:3001 npm run traffic -- 100
 npm run report -- .citetrace/synthetic.sqlite
 ```
 
-The generator checks for synthetic mode before creating any attempts. It scripts correct, wrong, and abandoned reviews independent of the assignment and verifies the server's scores. The audit report groups local attempts by environment and arm, with raw denominators. It excludes participant IDs and produces no Bayesian estimate. Read live experiment estimates in Flagsmith.
+The generator checks for synthetic mode before creating any attempts. It scripts correct, wrong, and abandoned reviews independent of the assignment and verifies the server's scores. The audit groups attempts by data namespace, experiment ID, and arm. It reports raw denominators and checks expected events against the local event ledger. SDK queue counts indicate local handoff. Verify delivery and view any experiment estimates in Flagsmith.
 
 ## Verify
 

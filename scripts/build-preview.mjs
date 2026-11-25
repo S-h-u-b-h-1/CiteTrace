@@ -1,6 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { TASK } from '../data/task.mjs';
 import { scoreAnswers, taskForParticipant } from '../lib/scoring.mjs';
+import { compareMarkup, compareStyles, mountCitationComparison } from './preview-compare.mjs';
 
 const readSource = (path) => readFile(new URL(path, import.meta.url), 'utf8');
 const [markup, styles, app] = await Promise.all([
@@ -9,7 +10,7 @@ const [markup, styles, app] = await Promise.all([
   readSource('../public/app.js'),
 ]);
 
-function previewRuntime(task, score, publicTask, mount) {
+function previewRuntime(task, score, publicTask, compareCitations, mount) {
   const allowed = ['full_source', 'focused_source'];
   const view = document.getElementById('preview-variant');
   const chosen = new URLSearchParams(location.search).get('view');
@@ -48,22 +49,25 @@ function previewRuntime(task, score, publicTask, mount) {
     return { ok: true, json: async () => payload };
   }
 
+  compareCitations(publicTask);
   mount(localFetch);
 }
 
 const embed = (value) => JSON.stringify(value).replaceAll('<', '\\u003c');
-const script = `(${previewRuntime})(${embed(TASK)}, ${scoreAnswers}, ${embed(taskForParticipant(TASK))}, function(fetch) {\n${app}\n});`;
+const script = `(${previewRuntime})(${embed(TASK)}, ${scoreAnswers}, ${embed(taskForParticipant(TASK))}, ${mountCitationComparison}, function(fetch) {\n${app}\n});`;
 const css = `${styles}
+${compareStyles}
 .preview-controls { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; justify-content: flex-end; }
 .preview-controls label { display: flex; gap: .4rem; align-items: center; font-size: .77rem; color: var(--muted); }
 .preview-controls select { font: inherit; padding: .3rem; background: var(--paper-white); color: var(--ink); border: 1px solid var(--line); border-radius: 4px; }`;
-const controls = '<div class="preview-controls"><div class="status" id="mode" hidden></div><label>Preview arm <select id="preview-variant"><option value="full_source">Full source</option><option value="focused_source">Focused citation</option></select></label></div>';
+const controls = '<div class="preview-controls"><div class="status" id="mode" hidden></div><label>Review arm <select id="preview-variant"><option value="full_source">Full source</option><option value="focused_source">Focused citation</option></select></label></div>';
 const preview = markup
   .replace('<title>CiteTrace — Evidence review</title>', '<title>CiteTrace — Offline preview</title>')
   .replace('<link rel="stylesheet" href="/styles.css">', () => `<style>\n${css}\n</style>`)
   .replace('  <script type="module" src="/app.js"></script>\n', '')
   .replace('class="brand" href="/"', 'class="brand" href="?view=full_source"')
   .replace('<div class="status" id="mode" hidden></div>', controls)
+  .replace(/<figure class="welcome-figure"[\s\S]*?<\/figure>/, () => compareMarkup)
   .replace('</body>', () => `<script>\n${script}\n</script>\n</body>`);
 const target = process.argv[2] ?? 'CiteTrace-preview.html';
 await writeFile(target, preview);

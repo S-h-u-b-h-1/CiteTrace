@@ -1,18 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { readFile, realpath } from 'node:fs/promises';
 import { createServer } from 'node:http';
-import { dirname, extname, resolve, sep } from 'node:path';
+import { dirname, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TASK } from './data/task.mjs';
 import { createPreviewProvider, createProvider, EXPOSURE_EVENT } from './lib/flagsmith.mjs';
 import { openReviews } from './lib/reviews.mjs';
 import { scoreAnswers, taskForParticipant } from './lib/scoring.mjs';
+import { isWithinDirectory, loadTaskConfiguration, VERDICTS } from './lib/task-loader.mjs';
 
 const COOKIE_NAME = 'citetrace_participant';
 const COOKIE_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
-const VERDICTS = ['supported', 'contradicted', 'insufficient'];
-const PUBLIC_ROOT = fileURLToPath(new URL('./public/', import.meta.url));
+const PUBLIC_ROOT = await realpath(fileURLToPath(new URL('./public/', import.meta.url)));
 const STATIC_TYPES = {
   '.html': 'text/html',
   '.css': 'text/css',
@@ -96,8 +96,11 @@ function validateAnswers(answers, claims, allowPartial) {
 }
 
 export function createApp({ databasePath = ':memory:', provider = createPreviewProvider(), task = TASK,
-  clock = Date.now, secureCookie = false, logger = console } = {}) {
-  const reviews = openReviews(databasePath, provider.namespace);
+  taskRevision = null, expectedExperimentId = null, clock = Date.now, secureCookie = false, logger = console } = {}) {
+  const namespace = taskRevision
+    ? `${provider.namespace}:task-${taskRevision}:experiment-${expectedExperimentId ?? 'preview'}`
+    : provider.namespace;
+  const reviews = openReviews(databasePath, namespace);
   const publicTask = taskForParticipant(task);
   let providerError = false;
   let queueError = false;
@@ -169,6 +172,9 @@ export function createApp({ databasePath = ':memory:', provider = createPreviewP
         let assignment;
         try {
           assignment = await provider.assign(id);
+        if (expectedExperimentId !== null && Number(assignment.experimentId) !== expectedExperimentId) {
+          throw new Error('Flagsmith assigned a different experiment.');
+        }
           providerError = false;
         } catch {
           providerError = true;
@@ -212,11 +218,13 @@ export function createApp({ databasePath = ':memory:', provider = createPreviewP
 
       const file = pathname === '/' ? resolve(PUBLIC_ROOT, 'index.html') : resolve(PUBLIC_ROOT, `.${decodeURIComponent(pathname)}`);
       const type = STATIC_TYPES[extname(file)];
-      if (!type || !file.startsWith(`${resolve(PUBLIC_ROOT)}${sep}`)) throw new RequestError(404, 'This page does not exist.');
+      if (!type || !isWithinDirectory(file, PUBLIC_ROOT)) throw new RequestError(404, 'This page does not exist.');
 
       let bytes;
       try {
-        bytes = await readFile(file);
+        const resolvedFile = await realpath(file);
+        if (!isWithinDirectory(resolvedFile, PUBLIC_ROOT)) throw new RequestError(404, 'This page does not exist.');
+        bytes = await readFile(resolvedFile);
       } catch (error) {
         if (error.code === 'ENOENT' || error.code === 'EISDIR') throw new RequestError(404, 'This page does not exist.');
         throw error;
@@ -248,10 +256,12 @@ export function createApp({ databasePath = ':memory:', provider = createPreviewP
 }
 
 async function main() {
+  const taskConfiguration = await loadTaskConfiguration(process.env, PUBLIC_ROOT, TASK);
   const databasePath = process.env.CITETRACE_DB || resolve('.citetrace', 'reviews.sqlite');
   if (databasePath !== ':memory:') mkdirSync(dirname(resolve(databasePath)), { recursive: true });
   const provider = await createProvider();
-  const app = createApp({ databasePath, provider, secureCookie: process.env.CITETRACE_SECURE_COOKIE === 'true' });
+  const app = createApp({ databasePath, provider, ...taskConfiguration,
+    secureCookie: process.env.CITETRACE_SECURE_COOKIE === 'true' });
   const server = createServer(app.handle);
   const port = Number(process.env.PORT || 3000);
   const host = process.env.HOST || '127.0.0.1';

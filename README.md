@@ -2,7 +2,7 @@
 
 CiteTrace tests whether opening a citation at its highlighted paragraph helps people verify AI-drafted claims without approving unsupported ones. It is a **Track 01 · Test Something Real** entry for the WeMakeDevs Toggle Wars Flagsmith hackathon.
 
-**Try it in your browser.** Download and open the [interactive offline preview](https://github.com/S-h-u-b-h-1/CiteTrace/releases/download/v1.0.0/CiteTrace-preview.html) to try both citation views. The preview sends no telemetry. The [2:21 demo video](https://github.com/S-h-u-b-h-1/CiteTrace/releases/download/v1.0.0/CiteTrace-Demo.mp4) walks through a complete review and the Flagsmith experiment.
+**Try it in your browser.** Download and open the [interactive offline preview](https://github.com/S-h-u-b-h-1/CiteTrace/releases/download/v1.1.0/CiteTrace-preview.html). Compare the same citation in both views side by side, then take a timed review. The preview sends no telemetry. The [2:21 demo video](https://github.com/S-h-u-b-h-1/CiteTrace/releases/download/v1.0.0/CiteTrace-Demo.mp4) walks through a complete review and the Flagsmith rehearsal.
 
 A reviewer has 90 seconds to read three claims about a fictional library programme and decide whether each is supported, contradicted, or insufficiently evidenced. In control, a citation opens the full source at the top. In treatment, the same source opens at the highlighted paragraph. Claims, options, document text, and scoring stay fixed.
 
@@ -63,7 +63,11 @@ CITETRACE_URL=http://127.0.0.1:3001 npm run traffic -- 100
 npm run report -- .citetrace/synthetic.sqlite
 ```
 
-The generator checks for synthetic mode before creating any attempts. It scripts correct, wrong, and abandoned reviews independent of the assignment and verifies the server's scores. The audit groups attempts by data namespace, experiment ID, and arm. It reports raw denominators and checks expected events against the local event ledger. SDK queue counts indicate local handoff. Verify delivery and view any experiment estimates in Flagsmith.
+The generator checks for synthetic mode before creating any attempts. It scripts correct, wrong, and abandoned reviews independent of the assignment and verifies the server's scores. The audit groups attempts by data namespace, experiment ID, and arm. Its verdict table distinguishes direct contradictions from cases with insufficient evidence, so you can see which type reviewers mistakenly approved. Claim counts cover submitted reviews, including unanswered claims in timed-out submissions. The audit checks expected events against the local ledger. SDK queue counts indicate local handoff. Verify delivery and view any experiment estimates in Flagsmith.
+
+### Run a held-out human pilot
+
+Use a fresh task for participants who could have seen the demo answers. `CITETRACE_TASK_FILE` takes an absolute path to a private JSON file with the same schema as `data/task.mjs`. Assign both arms the same frozen task. Only the source and claims go to the browser before submission. With a Flagsmith key configured, `CITETRACE_EXPERIMENT_ID` must match the designated pilot experiment before enrollment. The local audit keeps each task revision separate. See the [pilot procedure](docs/experiment.md#run-a-held-out-pilot) for setup, recruitment, and interpretation.
 
 ## Verify
 

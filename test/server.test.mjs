@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { test } from 'node:test';
 import { TASK } from '../data/task.mjs';
 import { createFlagsmithProvider, createPreviewProvider } from '../lib/flagsmith.mjs';
+import { loadTaskConfiguration } from '../lib/task-loader.mjs';
 import { createApp } from '../server.mjs';
 
 const correctAnswers = Object.fromEntries(TASK.claims.map(({ id, answer }) => [id, answer]));
@@ -221,4 +222,99 @@ test('keeps reviews after restart and separates pilot by traffic namespace', asy
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+async function privateTaskFiles(t) {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'citetrace-held-out-')));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const publicRoot = join(directory, 'public');
+  await mkdir(publicRoot);
+  const taskPath = join(directory, 'task.json');
+  const task = structuredClone(TASK);
+  task.title = 'Held-out test fixture';
+  task.claims[0].explanation = 'Private feedback fixture';
+  task.sources[0].paragraphs[0].answer = 'Unrecognized fields must stay out of public responses';
+  await writeFile(taskPath, JSON.stringify(task));
+  return { directory, publicRoot, taskPath, task, env: { CITETRACE_TASK_FILE: taskPath } };
+}
+
+test('validates held-out task paths, citation pointers, and live configuration before startup', async (t) => {
+  const { directory, publicRoot, taskPath, task, env } = await privateTaskFiles(t);
+  assert.deepEqual(await loadTaskConfiguration({}, publicRoot, TASK), { task: TASK });
+  const load = (variables) => loadTaskConfiguration(variables, publicRoot, TASK);
+  await assert.rejects(load({ CITETRACE_TASK_FILE: 'task.json' }), /absolute path/);
+  await assert.rejects(load({ ...env, CITETRACE_TRAFFIC: 'synthetic' }), /requires pilot traffic/);
+  await assert.rejects(load({ ...env, FLAGSMITH_ENVIRONMENT_KEY: 'fake-test-key' }), /CITETRACE_EXPERIMENT_ID/);
+
+  const visiblePath = join(publicRoot, 'task.json');
+  await writeFile(visiblePath, JSON.stringify(task));
+  const alias = join(directory, 'visible-alias.json');
+  await symlink(visiblePath, alias);
+  await assert.rejects(load({ CITETRACE_TASK_FILE: visiblePath }), /outside the public/);
+  await assert.rejects(load({ CITETRACE_TASK_FILE: alias }), /outside the public/);
+
+  const loaded = await load({ ...env, FLAGSMITH_ENVIRONMENT_KEY: 'fake-test-key', CITETRACE_EXPERIMENT_ID: '42' });
+  assert.equal(loaded.expectedExperimentId, 42);
+  assert.match(loaded.taskRevision, /^[a-f0-9]{64}$/);
+  assert.equal(loaded.task.sources[0].paragraphs[0].answer, undefined);
+  task.claims[0].paragraphId = 'missing-field';
+  await writeFile(taskPath, JSON.stringify(task));
+  await assert.rejects(load(env), /cite an existing paragraph/);
+});
+
+test('held-out feedback remains private until submission and old attempts cannot cross task revisions', async (t) => {
+  const { directory, publicRoot, taskPath, task, env } = await privateTaskFiles(t);
+  const databasePath = join(directory, 'reviews.sqlite');
+  const initial = await loadTaskConfiguration(env, publicRoot, TASK);
+  const first = createApp({ databasePath, ...initial });
+  let cookie;
+  let completed;
+  try {
+    const started = await request(first, '/api/start', { method: 'POST' });
+    cookie = started.cookie;
+    assert.equal(started.json.task.title, task.title);
+    assert.equal(started.json.task.claims[0].answer, undefined);
+    assert.equal(started.json.task.claims[0].explanation, undefined);
+    assert.equal(started.json.task.sources[0].paragraphs[0].answer, undefined);
+    await request(first, '/api/exposure', { method: 'POST', cookie });
+    completed = await request(first, '/api/submit', { method: 'POST', cookie, body: { answers: correctAnswers } });
+    assert.equal(completed.json.feedback[0].explanation, task.claims[0].explanation);
+  } finally {
+    await first.close();
+  }
+
+  await writeFile(taskPath, JSON.stringify(task, null, 2));
+  const reformatted = await loadTaskConfiguration(env, publicRoot, TASK);
+  const resumed = createApp({ databasePath, ...reformatted });
+  try {
+    assert.equal(reformatted.taskRevision, initial.taskRevision);
+    assert.deepEqual((await request(resumed, '/api/session', { cookie })).json.result, completed.json);
+  } finally {
+    await resumed.close();
+  }
+
+  task.claims[0].explanation = 'New version private feedback';
+  await writeFile(taskPath, JSON.stringify(task));
+  const revised = await loadTaskConfiguration(env, publicRoot, TASK);
+  const next = createApp({ databasePath, ...revised });
+  try {
+    assert.notEqual(revised.taskRevision, initial.taskRevision);
+    assert.equal((await request(next, '/api/session', { cookie })).json.variant, null);
+    assert.equal((await request(next, '/api/submit', { method: 'POST', cookie, body: { answers: correctAnswers } })).status, 409);
+  } finally {
+    await next.close();
+  }
+});
+
+test('rejects held-out assignments from a different Flagsmith experiment before exposure', async (t) => {
+  const { publicRoot, env } = await privateTaskFiles(t);
+  const config = await loadTaskConfiguration({ ...env, FLAGSMITH_ENVIRONMENT_KEY: 'fake-test-key',
+    CITETRACE_EXPERIMENT_ID: '41' }, publicRoot, TASK);
+  const fixture = flagsmithFixture();
+  const app = createApp({ provider: fixture.provider, ...config, logger: quiet });
+  t.after(() => app.close());
+  const attempt = await request(app, '/api/start', { method: 'POST' });
+  assert.equal(attempt.status, 503);
+  assert.equal((await request(app, '/api/exposure', { method: 'POST', cookie: attempt.cookie })).status, 409);
+  assert.deepEqual(fixture.calls.map(([kind]) => kind), ['assignment']);
 });

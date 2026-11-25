@@ -2,8 +2,8 @@
 
 ## What to try
 
-1. Download and open the [offline preview](https://github.com/S-h-u-b-h-1/CiteTrace/releases/download/v1.0.0/CiteTrace-preview.html) in a browser. No sign-in or dependencies are required.
-2. Select **Full source**, start a review, and open claim 2's citation. The document starts at its first section. Switch to **Focused citation** and open the same link. It lands on the highlighted transfer-policy paragraph. Both arms show the full source.
+1. Download and open the [offline preview](https://github.com/S-h-u-b-h-1/CiteTrace/releases/download/v1.1.0/CiteTrace-preview.html) in a browser. No sign-in or dependencies are required.
+2. In the side-by-side comparison, select the booking-transfer claim. Both panels show the same complete policy. The control starts at the first section and the focused view starts at the cited transfer-policy paragraph.
 3. Finish a review to see your score, time, unsupported approvals, and the exact passage behind each verdict. The preview records no experimental data.
 
 ## What the provider verified
@@ -24,8 +24,8 @@ Flagsmith reported exposure counts and pass rates. The local audit reported subm
 
 **Hold the rollout.** The script generated outcomes independently of the assigned view. These differences describe the rehearsal. They verify integration and do not estimate the effect on human reviewers. The primary denominator includes every exposure, so abandoning the review cannot improve the pass rate. The two guardrail denominators help distinguish checking quality from differences in submission rates.
 
-A human pilot needs a held-out task whose answers are kept server-side, a separate Flagsmith environment, a fixed collection window, and participants who have not seen the demo answers. Run a smoke test in an isolated environment before recruiting. The [analysis protocol](experiment.md#analysis-and-reporting) specifies the evidence needed before making a rollout decision.
+The [held-out pilot procedure](experiment.md#run-a-held-out-pilot) uses a fresh task and dedicated Flagsmith experiment. The [analysis protocol](experiment.md#analysis-and-reporting) specifies the evidence needed before making a rollout decision.
 
 ## Reproduce the checks
 
-Run `npm test` for the app and scoring checks. Run `npm run preview` to regenerate the interactive HTML. With a rehearsal database, run `npm run report -- <database.sqlite>` for participant-free counts and event reconciliation by namespace, Flagsmith experiment ID, and arm. The report identifies missing or unexpected local events and distinguishes queued events from pending local handoff. Confirm provider delivery separately in Flagsmith.
+Run `npm test` for the app and scoring checks. Run `npm run preview` to regenerate the interactive HTML. With a rehearsal database, run `npm run report -- <database.sqlite>` for participant-free counts and event reconciliation by namespace, Flagsmith experiment ID, and arm. The verdict table breaks out mistakes on contradicted claims and claims with insufficient evidence. The report identifies missing or unexpected local events and distinguishes queued events from pending local handoff. Confirm provider delivery separately in Flagsmith.

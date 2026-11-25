@@ -40,6 +40,17 @@ try {
      GROUP BY namespace, experiment_id, variant, name
      ORDER BY namespace, experiment_id, variant, name
   `).all();
+  const verdicts = db.prepare(`
+    SELECT namespace, experiment_id AS experimentId, variant,
+           json_extract(answer.value, '$.answer') AS expectedVerdict,
+           COALESCE(json_extract(answer.value, '$.selected'), 'unanswered') AS selectedVerdict,
+           COUNT(*) AS count
+      FROM reviews r, json_each(r.result_json, '$.feedback') answer
+     WHERE r.submitted_at IS NOT NULL
+       AND json_type(r.result_json, '$.feedback') = 'array'
+     GROUP BY namespace, experiment_id, variant, expectedVerdict, selectedVerdict
+     ORDER BY namespace, experiment_id, variant, expectedVerdict, selectedVerdict
+  `).all();
   db.exec('COMMIT');
 
   const armKey = ({ namespace, experimentId, variant }) => JSON.stringify([namespace, experimentId, variant]);
@@ -53,17 +64,26 @@ try {
       pendingSdkQueue: usesSdk ? pendingSdkQueue : null,
     };
   }
+  const verdictsByArm = new Map(rows.map((row) => [armKey(row), {}]));
+  for (const { expectedVerdict, selectedVerdict, count, ...arm } of verdicts) {
+    const breakdown = verdictsByArm.get(armKey(arm));
+    breakdown[expectedVerdict] ??= { submittedClaims: 0, supported: 0, contradicted: 0, insufficient: 0, unanswered: 0 };
+    breakdown[expectedVerdict][selectedVerdict] += count;
+    breakdown[expectedVerdict].submittedClaims += count;
+  }
   const arms = rows.map((row) => ({
     ...row,
     unsubmittedAfterExposure: row.exposed - row.submitted,
     passRatePerExposure: row.exposed ? row.passed / row.exposed : null,
     falseApprovalRatePerExposure: row.exposed ? row.reviewersWithFalseApproval / row.exposed : null,
     falseApprovalRatePerSubmission: row.submitted ? row.reviewersWithFalseApproval / row.submitted : null,
+    verdictBreakdown: verdictsByArm.get(armKey(row)),
     eventAudit: audits.get(armKey(row)),
   }));
   console.log(JSON.stringify({
     source: 'CiteTrace local audit',
     sdkQueueNote: 'SDK queue counts reflect local handoff only. Provider delivery requires separate verification.',
+    verdictBreakdownNote: 'Claim counts come from submitted reviews with recorded feedback. They include unanswered claims in submitted reviews and exclude abandoned reviews.',
     arms,
   }, null, 2));
 } finally {
